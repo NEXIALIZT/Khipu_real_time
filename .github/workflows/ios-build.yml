@@ -1,0 +1,87 @@
+# Compila un .ipa SIN FIRMAR de Khipu Guia en una Mac gratuita de GitHub.
+# Luego se firma e instala con Sideloadly usando un Apple ID gratuito.
+#
+# Uso: pestaña "Actions" en GitHub -> "iOS IPA (sin firmar)" -> "Run workflow".
+# Al terminar, descarga el artefacto "khipu-guia-ipa" (contiene el .ipa).
+
+name: iOS IPA (sin firmar)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Usar la versión más reciente de Xcode
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)
+          echo "Usando $LATEST"
+          sudo xcode-select -s "$LATEST/Contents/Developer"
+          xcodebuild -version
+
+      - name: Crear .env desde los secretos de GitHub
+        run: |
+          cat > .env <<EOF
+          EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_ELEVENLABS_API_KEY=${{ secrets.EXPO_PUBLIC_ELEVENLABS_API_KEY }}
+          EXPO_PUBLIC_KHIPUBASE_URL=${{ secrets.EXPO_PUBLIC_KHIPUBASE_URL }}
+          EXPO_PUBLIC_KHIPUBASE_CLOUD_URL=${{ secrets.EXPO_PUBLIC_KHIPUBASE_CLOUD_URL }}
+          EOF
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Generar proyecto nativo iOS
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Instalar CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Compilar (Release, sin firma)
+        working-directory: ios
+        run: |
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Workspace: $WORKSPACE  Scheme: $SCHEME"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Empaquetar .ipa
+        run: |
+          APP=$(find ios/build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          echo "App: $APP"
+          mkdir -p output/Payload
+          cp -R "$APP" output/Payload/
+          cd output
+          zip -qry khipu-guia-unsigned.ipa Payload
+          ls -lh khipu-guia-unsigned.ipa
+
+      - name: Subir .ipa como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: khipu-guia-ipa
+          path: output/khipu-guia-unsigned.ipa
+          retention-days: 14
