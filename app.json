@@ -43,7 +43,11 @@
     "owner": "davidfvm006",
     "plugins": [
       "expo-speech-recognition",
-      "expo-audio"
+      "expo-audio",
+      "expo-camera",
+      "expo-status-bar",
+      "expo-font",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
